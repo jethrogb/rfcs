@@ -70,6 +70,9 @@ programming mistakes. However, the proposed implementation should prevent
 accidental use and only override visibility for programmers who know what they 
 want to do.
 
+Using this feature can cause major bugs when the code you're interacting with 
+assumes invariants that one is now able to modify and break.
+
 # Alternatives
 
 As mentioned in the *motiviation*, there are two existing ways to get around the 
