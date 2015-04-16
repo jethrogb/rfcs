@@ -1,0 +1,86 @@
+02:24 < jethrogb> I'm soliciting feedback on a draft RFC https://github.com/jethrogb/rfcs/blob/topic/visibility-override/text/0000-visibility-override.md
+02:26 < scott> jethrogb: I like the idea. breaking privacy should be strongly avoided, but it's nice to have an easy out when you absolutely need it
+02:29 < scott> jethrogb: it should perhaps be more emphasized that visibility is highly unsafe
+02:30 < scott> jethrogb: eg. you can easily cause some other code to crash with just visibility_override and no unsafe, if the other code assumes invariants which you then break
+02:30 < scott> s/visibility/visibility_override/
+02:31 < jethrogb> I'll add that to the drawbacks section
+02:35 < jethrogb> updated
+02:46 < scott> jethrogb: it's a bit bikesheddy, but I would rename it to unsafe_visibility_override or at least something with unsafe in the name in light of my above comments
+02:47 < scott> which also makes it show up in grep if someone's auditing unsafe blocks
+02:47 < scott> since it can cause memory unsafety, etc, that's pretty important
+02:48 < scott> even more nitpicky, your code sample isn't following standard Rust style (same-line curly braces, spacing around operators and other bits of syntax)
+02:55 < jethrogb> scott: I assume you're worried about people modifying things like Vec.cap
+02:55 < scott> jethrogb: yeah, that kind of thing, which may be unclear to people outside the code where the field is private
+02:55 < jethrogb> do you think it would make sense to create different patterns for mutable and immutable access?
+02:57 < scott> I don't think that would be worth it
+02:58 < jethrogb> e.g. the same as proposed for immutable access, but wrap the access in unsafe{} for mutable access
+02:59 < sfackler> it's unsafe either way
+02:59 < sfackler> e.g. Mutex.inner
+03:01 < jethrogb> hmmm
+03:06 < jethrogb> is there anything else on here that's wrong? https://doc.rust-lang.org/reference.html#behaviour-not-considered-unsafe
+03:07 < scott> it's not wrong
+03:08 < scott> reading private fields isn't unsafe{} just like setting Vec.cap isn't, but it's still very dangerous
+03:08 < scott> since it can make some other unsafe{} code go wrong
+03:09 < jethrogb> in that sense reading Mutex.data is also not unsafe
+03:10 <@huon> reading it without unsynchronisation can be unsafe (can cause a data race)
+03:10 <@huon> *without synchronisation
+03:11 < jethrogb> right, but according to the definition data races are not unsafe, but forbidden
+03:12 < aatch> jethrogb, that's because you shouldn't be able to create a data race without unsafe code to start with.
+03:13 <@huon> hm, are you meaning unsafe in the literal sense of the `unsafe` keyword in Rust?
+03:13 < scott> jethrogb: I think Rust guarantees no data races without unsafe{} code
+03:13 <@huon> things in Rust are considered `unsafe` if they can lead to forbidden behaviour if the programmer isn't careful
+03:14 < jethrogb> I'm confused and not sure what I mean
+03:14 < jethrogb> the doc says "The following is a list of behavior which is forbidden in all Rust code, including within unsafe blocks and unsafe functions."
+03:14 < jethrogb> but clearly you can write whatever you want in unsafe{}
+03:14 <@huon> (in safe code, the compiler guarantees that nothing forbidden can happen)
+03:14 <@huon> right; the program exhibits undefined behaviour and is fundamentally incorrect if it triggers any of those behaviours
+03:14 < scott> jethrogb: if you do something forbidden in an unsafe block you generally invoke undefined behaviour
+03:15 <@huon> `unsafe` gives the programmer more power at the risk of triggering forbidden behaviour since the compiler isn't/can't check the unsafe behaviours fully
+03:15 < aatch> In this context, "unsafe" is like rock climbing without the appropriate gear, you might have a good reason to do so, "forbidden" is like time travel, if you manage to do it, the universe breaks.
+03:16 < scott> I think "forbidden" being death fits your analogy better :p
+03:16 < jethrogb> haha
+03:16 < aatch> Well no, the point is more that we assume that "forbidden" things can't happen and therefore if they do, all bets are off.
+03:16 < jethrogb> I guess I was thinking about unsafe{} with respect to memory-safety
+03:16 < jethrogb> but it's really used for other things too
+03:17 <@huon> not really
+03:17 < aatch> In general, it all boils down to memory safety anyway.
+03:17 < scott> data races are included in what Rust means by memory safety
+03:17 <@huon> all rust code should/must be memory safe; normally the compiler ensures it, but `unsafe` puts the responsibility in the hands of the programmer (locally)
+03:18 < aatch> Data races are just a specific case of memory unsafety.
+03:18 < jethrogb> ok, so we have demonstrated that you can achieve data races through privacy violations
+03:18 < jethrogb> but that can't be both unsafe and not-unsafe
+03:19 < scott> different meanings of unsafe are involved
+03:19 < jethrogb> I'm afraid so
+03:19 < aatch> jethrogb, in that list, getting at the private field requires unsafe code to start with.
+03:19 < scott> some other code that has direct access to the private field is using unsafe{} and manually preserving some invariants. then it makes the field private to make sure no one breaks those invariants
+03:20 < scott> now your new attribute comes along and opens the hole again to break those invariants
+03:20 < scott> so unsafety-as-in-forbidden-behaviour can result again
+03:20 < jethrogb> would it make more sense to just allow privacy violations in unsafe{} instead of adding this attribute?
+03:20 < scott> that seems worse
+03:21 < aatch> jethrogb, my opinion is that the attribute isn't worth the bother.
+03:21 <@huon> jethrogb: another drawback is that backwards compatibility becomes much more difficult
+03:21 <@huon> e.g. renaming a private field can cause downstream crates to break
+03:22 < scott> huon: I see this attribute as a declaration that "if upstream breaks me it's my fault" but I can see people disagreeing with even that
+03:22 < jethrogb> what scott said
+03:22 < jethrogb> also, upstream can always break things downstream
+03:22 < scott> yeah, but private APIs shouldn't ever
+03:23 < aatch> it's even more of an issue when the break might be several crates removed.
+03:23 < sfackler> "it's my fault" does not always end up being the reaction: https://android.googlesource.com/platform/libcore/+/81abb6fb7332dfe62ff596ffb250d8aec61895df%5E!/
+03:24 < scott> indeed. de facto dependencies trump everything if you have important downstreams
+03:25 < aatch> A user (or hell, even author) of crate C isn't going to care if the reason the crate is broken is because crate B relied on private parts of crate A
+03:25 < sfackler> it's the same reason there's no way to opt in to features on stable releases: people are going to use unstable stuff and complain if it changes
+03:25 < scott> good point with the transitive deps
+03:26 < jethrogb> I'm not terribly familier with the rust linker, but shouldn't these things be caught at compile/link time?
+03:27 < sfackler> it will be, but you're still breaking random downstream stuff in ways you wouldn't expect
+03:27 < scott> some changes might be subtle runtime bugs, some may be compiler errors, but that's not even the point of the above reasoning
+03:27 <@bstrie> jethrogb: I don't believe Rust has any feature that can cause link-time failure
+03:27 < sfackler> bugs!
+03:27 <@bstrie> RFC: more bugs!
+03:28 < jethrogb> backwards compatibility is an interesting discussion, but it's actually an argument for this attribute
+03:28 < jethrogb> you can already do this using an unsafe typecast
+03:29 < jethrogb> and the only way you know it breaks is during runtime
+03:29 < jethrogb> but with the attribute at least you get type-checking
+03:29 < sfackler> or you could... not access private fields
+03:29 < jethrogb> so that should help remediate backwards-compatibility issues
+03:30 < jethrogb> sfackler: if I have to choose between 10x performance slowdown and accessing private fields I know what I'm choosing
+03:30 < scott> jethrogb: seems better to submit something upstream in that case
