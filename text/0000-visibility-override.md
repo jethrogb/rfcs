@@ -42,21 +42,17 @@ Here's an example of how this would work:
 use std::intrinsics::cttz32;
 use std::collections::BitVec;
 
-pub trait LowestBit
-{
+pub trait LowestBit {
     fn lowest_bit(&self) -> Option<usize>;
 }
 
 #[visibility_override]
-impl LowestBit for BitVec
-{
-    fn lowest_bit(&self) -> Option<usize>
-    {
+impl LowestBit for BitVec {
+    fn lowest_bit(&self) -> Option<usize> {
         // Currently: field `storage` of struct `collections::bit::BitVec` is private
-        for (idx,&word) in self.storage.iter().enumerate()
-        {
+        for (idx, &word) in self.storage.iter().enumerate() {
             if (word==0) { continue }
-            return Some(idx*32+(unsafe {cttz32(word) as usize}));
+            return Some(idx * 32 + (unsafe {cttz32(word) as usize}));
         }
         return None;
     }
